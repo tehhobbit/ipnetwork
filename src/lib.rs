@@ -37,15 +37,18 @@ fn cidr_to_hostcount(cidr: u32) -> u32 {
 }
 
 impl Ipv4Network {
+
     pub fn new(first: u32, cidr: u32) -> Result<Ipv4Network, Error> {
         match Ipv4Network::is_valid(first, cidr) {
             true => Ok(Ipv4Network {first: first, cidr: cidr}),
             false => Err(Error::InvalidNetwork)
         }
     }
+
     pub fn hostcount(&self) -> u32 {
         cidr_to_hostcount(self.cidr)
     }
+
     pub fn subnets(&self, new_cidr: u32) -> NetworkIterator {
         NetworkIterator {
             current: self.first,
@@ -54,9 +57,11 @@ impl Ipv4Network {
             max: self.first + self.hostcount() - 1
         }
     }
+
     pub fn last(&self) -> Ipv4Addr {
         Ipv4Addr::from(self.first + self.hostcount() - 1)
     }
+
     pub fn first(&self) -> Ipv4Addr {
         Ipv4Addr::from(self.first)
     }
@@ -81,12 +86,12 @@ impl Iterator for NetworkIterator {
                 Err(_) => None
             }
         } else {
-            return None;
+            None
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        return (self.max as usize, Some(self.max as usize))
+        (self.max as usize, Some(self.max as usize))
     }
 }
 
