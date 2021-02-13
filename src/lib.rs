@@ -28,7 +28,8 @@ pub struct NetworkIterator {
 
 #[derive(Debug)]
 pub struct HostIterator {
-    current: u32
+    current: u32,
+    max: u32
 }
 
 #[inline(always)]
@@ -57,7 +58,12 @@ impl Ipv4Network {
             max: self.first + self.hostcount() - 1
         }
     }
-
+    pub fn hosts(&self) -> HostIterator {
+        HostIterator {
+            current: self.first,
+            max: self.first + self.hostcount()
+        }
+    }
     pub fn last(&self) -> Ipv4Addr {
         Ipv4Addr::from(self.first + self.hostcount() - 1)
     }
