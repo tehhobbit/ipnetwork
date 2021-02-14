@@ -1,9 +1,13 @@
 use std::net::Ipv4Addr;
+use std::cmp::Ordering;
+use std::str::FromStr;
+
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
     InvalidNetwork,
-    CidrMissMatch
+    CidrMissMatch,
+    NetworkParseError,
 }
 
 #[derive(Debug, PartialEq)]
@@ -11,7 +15,7 @@ pub enum IpNetwork {
     V4(Ipv4Network)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq)]
 pub struct Ipv4Network {
     pub first: u32,
     pub cidr: u32
@@ -37,8 +41,11 @@ fn cidr_to_hostcount(cidr: u32) -> u32 {
     1 << (32 - cidr)
 }
 
+
 impl Ipv4Network {
 
+    pub const MAX_NETMASK: u32 = u32::MAX;
+    
     pub fn new(first: u32, cidr: u32) -> Result<Ipv4Network, Error> {
         match Ipv4Network::is_valid(first, cidr) {
             true => Ok(Ipv4Network {first: first, cidr: cidr}),
@@ -75,6 +82,13 @@ impl Ipv4Network {
         let ip_int = u32::from(ip_addr.clone());
         ip_int > self.first && ip_int < (self.first + self.hostcount() - 1)
     }
+    pub fn subnet(&self, other: &Self) -> bool{
+        self.first() > other.first() && other.last() < self.last()
+    }
+    pub fn netmask(&self) -> Ipv4Addr {
+        let numeric = Ipv4Network::MAX_NETMASK ^ (self.hostcount() -1);
+        Ipv4Addr::from(numeric)
+    }
 
     #[inline(always)]
     fn is_valid(first: u32, cidr: u32) -> bool {
@@ -97,13 +111,44 @@ impl Iterator for NetworkIterator {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.max as usize, Some(self.max as usize))
+        (self.current as usize, Some(self.max as usize))
+    }
+}
+impl Ord for Ipv4Network {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.first().cmp(&other.first())
     }
 }
 
+impl PartialOrd for Ipv4Network {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering>{
+        Some(self.cmp(other))
+    }
+}
 impl PartialEq for Ipv4Network {
     fn eq(&self, other: &Self) -> bool {
         self.first == other.first && self.cidr == other.cidr
+    }
+}
+impl FromStr for Ipv4Network {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Ipv4Network, Self::Err> {
+        let parts: Vec<&str> = s.split('/').collect();
+        match parts.len() {
+            2 => {
+                let ip_first: Ipv4Addr = match parts[0].parse() {
+                    Ok(ip_addr) => ip_addr,
+                    Err(_) => return Err(Self::Err::NetworkParseError)
+                };
+                let cidr: u32 = match parts[1].parse() {
+                    Ok(cidr) => cidr,
+                    Err(_) => return Err(Self::Err::NetworkParseError)
+                };
+                Ipv4Network::new(u32::from(ip_first), cidr)
+            },
+            _ => Err(Self::Err::NetworkParseError)
+        }
     }
 }
 
@@ -156,5 +201,15 @@ mod tests {
         let network = Ipv4Network::new(16777216, 8).unwrap();
         let networks: Vec<Ipv4Network> = network.subnets(32).collect();
         assert_eq!(networks[0].cidr, 32);
+    }
+    #[test]
+    fn test_from_string() {
+        let res = Ipv4Network::from_str("1.1.1.0/24");
+        assert_eq!(Ok(Ipv4Network{first: 16843008, cidr: 24}), res)
+    }
+    #[test]
+    fn test_from_string_fail() {
+        let res = Ipv4Network::from_str("1.1.1.1");
+        assert_eq!(Err(Error::NetworkParseError), res)
     }
 }
