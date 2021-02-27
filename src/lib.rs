@@ -82,8 +82,11 @@ impl Ipv4Network {
         let ip_int = u32::from(ip_addr.clone());
         ip_int > self.first && ip_int < (self.first + self.hostcount() - 1)
     }
-    pub fn subnet(&self, other: &Self) -> bool{
-        self.first() > other.first() && other.last() < self.last()
+    pub fn subnet(&self, other: &Self) -> bool {
+        self.first() <= other.first() && other.last() <= self.last()
+    }
+    pub fn supernet(&self, other: &Self) -> bool {
+        self.first() >= other.first() && other.last() >= self.last()
     }
     pub fn netmask(&self) -> Ipv4Addr {
         let numeric = Ipv4Network::MAX_NETMASK ^ (self.hostcount() -1);
@@ -116,7 +119,11 @@ impl Iterator for NetworkIterator {
 }
 impl Ord for Ipv4Network {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.first().cmp(&other.first())
+        let order = self.first().cmp(&other.first());
+        match order {
+            Ordering::Equal => self.cidr.cmp(&other.cidr),
+            _ => order
+        }
     }
 }
 
@@ -211,5 +218,23 @@ mod tests {
     fn test_from_string_fail() {
         let res = Ipv4Network::from_str("1.1.1.1");
         assert_eq!(Err(Error::NetworkParseError), res)
+    }
+    #[test]
+    fn test_subnet() {
+        let supernet = Ipv4Network::from_str("1.0.0.0/22").unwrap();
+        let subnet = Ipv4Network::from_str("1.0.1.0/24").unwrap();
+        assert_eq!(supernet.subnet(&subnet), true);
+    }
+    #[test]
+    fn test_supernet() {
+        let supernet = Ipv4Network::from_str("1.0.0.0/22").unwrap();
+        let subnet = Ipv4Network::from_str("1.0.1.0/24").unwrap();
+        assert_eq!(subnet.supernet(&supernet), true);
+    }
+    #[test]
+    fn test_bigger() {
+        let supernet = Ipv4Network::from_str("1.0.0.0/22").unwrap();
+        let subnet = Ipv4Network::from_str("1.0.1.0/24").unwrap();
+        assert_eq!(&subnet > &supernet, true);
     }
 }
