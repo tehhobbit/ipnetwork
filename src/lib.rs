@@ -9,23 +9,41 @@ pub enum Error {
     CidrMissMatch,
     NetworkParseError,
 }
-
 #[derive(Debug, PartialEq)]
 pub enum IpNetwork {
     V4(Ipv4Network)
 }
 
+/// An IPv4 network. The network is represented by
+/// Network consists of a network address and cidr
+/// the network address is represented as is represented
+/// by u32
+///
+/// ```
+/// use ipnetwork::Ipv4Network;
+/// let network = "1.1.1.0/24".parse();
+/// assert_eq!(Ok(Ipv4Network{first: 16843008, cidr: 24}), network)
 #[derive(Debug, Eq)]
 pub struct Ipv4Network {
     pub first: u32,
     pub cidr: u32
 }
-
+/// Iterator to iterate over subnets of a network
+/// ```
+/// use ipnetwork::Ipv4Network;
+/// let network: Ipv4Network = "1.0.0.0/24".parse().unwrap();
+/// let subnets: Vec<Ipv4Network> = network.subnets(25).collect();
+/// assert_eq!(subnets.len(), 2);
+/// ```
 #[derive(Debug)]
 pub struct NetworkIterator {
+    /// The current network address
     current: u32,
+    /// Upper bounds
     max: u32,
+    /// How many addresses should the new network have
     stepping: u32,
+    /// Cidr of the new network
     cidr: u32
 }
 
@@ -45,7 +63,8 @@ fn cidr_to_hostcount(cidr: u32) -> u32 {
 impl Ipv4Network {
 
     pub const MAX_NETMASK: u32 = u32::MAX;
-    
+
+    /// Creates a new IPv4 Network
     pub fn new(first: u32, cidr: u32) -> Result<Ipv4Network, Error> {
         match Ipv4Network::is_valid(first, cidr) {
             true => Ok(Ipv4Network {first: first, cidr: cidr}),
@@ -204,12 +223,6 @@ mod tests {
         assert_eq!(test2.len(), 2);
     }
     #[test]
-    fn test_long_iter() {
-        let network = Ipv4Network::new(16777216, 8).unwrap();
-        let networks: Vec<Ipv4Network> = network.subnets(32).collect();
-        assert_eq!(networks[0].cidr, 32);
-    }
-    #[test]
     fn test_from_string() {
         let res = Ipv4Network::from_str("1.1.1.0/24");
         assert_eq!(Ok(Ipv4Network{first: 16843008, cidr: 24}), res)
@@ -236,5 +249,10 @@ mod tests {
         let supernet = Ipv4Network::from_str("1.0.0.0/22").unwrap();
         let subnet = Ipv4Network::from_str("1.0.1.0/24").unwrap();
         assert_eq!(&subnet > &supernet, true);
+    }
+    #[test]
+    fn test_parse() {
+        let network = "1.1.1.0/24".parse();
+        assert_eq!(Ok(Ipv4Network{first: 16843008, cidr: 24}), network)
     }
 }
