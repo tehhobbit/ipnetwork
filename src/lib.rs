@@ -1,6 +1,8 @@
 use std::net::Ipv4Addr;
 use std::cmp::Ordering;
 use std::str::FromStr;
+use std::result::Result;
+use std::convert::From;
 
 
 #[derive(Debug, PartialEq)]
@@ -26,7 +28,7 @@ pub enum IpNetwork {
 #[derive(Debug, Eq)]
 pub struct Ipv4Network {
     pub first: u32,
-    pub cidr: u32
+    pub cidr: u8
 }
 /// Iterator to iterate over subnets of a network
 /// ```
@@ -44,7 +46,7 @@ pub struct NetworkIterator {
     /// How many addresses should the new network have
     stepping: u32,
     /// Cidr of the new network
-    cidr: u32
+    cidr: u8
 }
 
 
@@ -55,7 +57,7 @@ pub struct HostIterator {
 }
 
 #[inline(always)]
-fn cidr_to_hostcount(cidr: u32) -> u32 {
+fn cidr_to_hostcount(cidr: u8) -> u32 {
     1 << (32 - cidr)
 }
 
@@ -65,7 +67,8 @@ impl Ipv4Network {
     pub const MAX_NETMASK: u32 = u32::MAX;
 
     /// Creates a new IPv4 Network
-    pub fn new(first: u32, cidr: u32) -> Result<Ipv4Network, Error> {
+    pub fn new(a: u8, b: u8, c: u8, d: u8, cidr: u8) -> Result<Ipv4Network, Error> {
+        let first = u32::from_be_bytes([a, b, c, d]);
         match Ipv4Network::is_valid(first, cidr) {
             true => Ok(Ipv4Network {first: first, cidr: cidr}),
             false => Err(Error::InvalidNetwork)
@@ -76,7 +79,7 @@ impl Ipv4Network {
         cidr_to_hostcount(self.cidr)
     }
 
-    pub fn subnets(&self, new_cidr: u32) -> NetworkIterator {
+    pub fn subnets(&self, new_cidr: u8) -> NetworkIterator {
         NetworkIterator {
             current: self.first,
             stepping: cidr_to_hostcount(new_cidr),
@@ -113,7 +116,7 @@ impl Ipv4Network {
     }
 
     #[inline(always)]
-    fn is_valid(first: u32, cidr: u32) -> bool {
+    fn is_valid(first: u32, cidr: u8) -> bool {
         first % cidr_to_hostcount(cidr) == 0
     }
 }
@@ -123,7 +126,8 @@ impl Iterator for NetworkIterator {
     fn next(&mut self) -> Option<Ipv4Network> {
         if self.current <  self.max {
             self.current += self.stepping;
-            match Ipv4Network::new(self.current, self.cidr) {
+            let bytes = self.current.to_be_bytes();
+            match Ipv4Network::new(bytes[0], bytes[1], bytes[2], bytes[3], self.cidr) {
                 Ok(n) => Some(n),
                 Err(_) => None
             }
@@ -167,11 +171,12 @@ impl FromStr for Ipv4Network {
                     Ok(ip_addr) => ip_addr,
                     Err(_) => return Err(Self::Err::NetworkParseError)
                 };
-                let cidr: u32 = match parts[1].parse() {
+                let cidr: u8 = match parts[1].parse() {
                     Ok(cidr) => cidr,
                     Err(_) => return Err(Self::Err::NetworkParseError)
                 };
-                Ipv4Network::new(u32::from(ip_first), cidr)
+                let ip_tuple = u32::from(ip_first).to_be_bytes();
+                Ipv4Network::new(ip_tuple[0], ip_tuple[1], ip_tuple[2], ip_tuple[3], cidr)
             },
             _ => Err(Self::Err::NetworkParseError)
         }
@@ -186,37 +191,37 @@ mod tests {
     fn new_network() {
         assert_eq!(
             Ok(Ipv4Network { first: 16843008, cidr: 25}),
-            Ipv4Network::new(16843008, 25)
+            Ipv4Network::new(1, 1, 1, 0, 25)
         );
     }
     #[test]
     fn new_network_invalid() {
         assert_eq!(
             Err(Error::InvalidNetwork),
-            Ipv4Network::new(16843008, 23)
+            Ipv4Network::new(1, 1, 1, 0, 23)
         );
     }
     #[test]
     fn first_address() {
-        let network = Ipv4Network::new(16843008, 24).unwrap();
+        let network = Ipv4Network::new(1, 1, 1, 0, 24).unwrap();
         let first: Ipv4Addr = "1.1.1.0".parse().unwrap();
         assert_eq!(first, network.first());
 
     }
     #[test]
     fn last_address() {
-        let network = Ipv4Network::new(16843008, 24).unwrap();
+        let network = Ipv4Network::new(1, 1, 1, 0, 24).unwrap();
         let last: Ipv4Addr = Ipv4Addr::from_str("1.1.1.255").unwrap();
         assert_eq!(last, network.last());
     }
     #[test]
     fn contains_addr() {
-        let network = Ipv4Network::new(16843008, 24).unwrap();
+        let network = Ipv4Network::new(1, 1, 1, 0, 24).unwrap();
         assert_eq!(network.contains(&Ipv4Addr::new(1,1,1,1)), true);
     }
     #[test]
     fn iterate() {
-        let network = Ipv4Network::new(16843008, 24).unwrap();
+        let network = Ipv4Network::new(1, 1, 1, 0, 24).unwrap();
         let test = network.subnets(25);
         assert_eq!(test.stepping, 128);
         let test2: Vec<Ipv4Network> = test.collect();
