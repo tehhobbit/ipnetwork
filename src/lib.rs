@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
 use std::convert::From;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::result::Result;
 use std::str::FromStr;
+use std::u8;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -13,8 +14,14 @@ pub enum Error {
 #[derive(Debug, PartialEq)]
 pub enum IpNetwork {
     V4(Ipv4Network),
+    V6(Ipv6Network),
 }
 
+#[derive(Debug, Eq)]
+pub struct Ipv6Network {
+    pub first: u128,
+    pub cidr: u8,
+}
 /// An IPv4 network. The network is represented by
 /// Network consists of a network address and cidr
 /// the network address is represented as is represented
@@ -33,11 +40,11 @@ pub struct Ipv4Network {
 /// ```
 /// use ipnetwork::Ipv4Network;
 /// let network: Ipv4Network = "1.0.0.0/24".parse().unwrap();
-/// let subnets: Vec<Ipv4Network> = network.subnets(25).collect();
+/// let subnets: Vec<Ipv4Network> = network.into_subnets(25).collect();
 /// assert_eq!(subnets.len(), 2);
 /// ```
 #[derive(Debug)]
-pub struct NetworkIterator {
+pub struct NetworkV4Iterator {
     /// The current network address
     current: u32,
     /// Upper bounds
@@ -49,14 +56,21 @@ pub struct NetworkIterator {
 }
 
 #[derive(Debug)]
+pub struct NetworkV6Iterator {
+    /// The current network address
+    current: u128,
+    /// Upper bounds
+    max: u128,
+    /// How many addresses should the new network have
+    stepping: u128,
+    /// Cidr of the new network
+    cidr: u8,
+}
+
+#[derive(Debug)]
 pub struct HostIterator {
     current: u32,
     max: u32,
-}
-
-#[inline(always)]
-fn cidr_to_hostcount(cidr: u8) -> u32 {
-    1 << (32 - cidr)
 }
 
 impl Ipv4Network {
@@ -70,20 +84,24 @@ impl Ipv4Network {
             false => Err(Error::InvalidNetwork),
         }
     }
-
-    pub fn hostcount(&self) -> u32 {
-        cidr_to_hostcount(self.cidr)
+    #[inline(always)]
+    fn cidr_to_hostcount(cidr: u8) -> u32 {
+        1 << (32 - cidr)
     }
 
-    pub fn subnets(&self, new_cidr: u8) -> NetworkIterator {
-        NetworkIterator {
+    pub fn hostcount(&self) -> u32 {
+        Ipv4Network::cidr_to_hostcount(self.cidr)
+    }
+
+    pub fn into_subnets(&self, new_cidr: u8) -> NetworkV4Iterator {
+        NetworkV4Iterator {
             current: self.first,
-            stepping: cidr_to_hostcount(new_cidr),
+            stepping: Ipv4Network::cidr_to_hostcount(new_cidr),
             cidr: new_cidr,
             max: self.first + self.hostcount() - 1,
         }
     }
-    pub fn hosts(&self) -> HostIterator {
+    pub fn into_hosts(&self) -> HostIterator {
         HostIterator {
             current: self.first,
             max: self.first + self.hostcount(),
@@ -113,11 +131,47 @@ impl Ipv4Network {
 
     #[inline(always)]
     fn is_valid(first: u32, cidr: u8) -> bool {
-        first % cidr_to_hostcount(cidr) == 0
+        first % Ipv4Network::cidr_to_hostcount(cidr) == 0
     }
 }
 
-impl Iterator for NetworkIterator {
+impl Ipv6Network {
+    pub const MAX_NETMASK: u128 = u128::MAX;
+
+    pub fn new(first: u128, cidr: u8) -> Result<Ipv6Network, Error> {
+        match Ipv6Network::is_valid(first, cidr) {
+            true => Ok(Ipv6Network { first, cidr }),
+            false => Err(Error::InvalidNetwork),
+        }
+    }
+    pub fn first(&self) -> Ipv6Addr {
+        Ipv6Addr::from(self.first)
+    }
+
+    pub fn last(&self) -> Ipv6Addr {
+        Ipv6Addr::from(self.first + self.hostcount())
+    }
+
+    pub fn hostcount(&self) -> u128 {
+        Ipv6Network::cidr_to_hostcount(self.cidr)
+    }
+    #[inline(always)]
+    fn cidr_to_hostcount(cidr: u8) -> u128 {
+        1 << (128 - cidr)
+    }
+    pub fn is_subnet(&self, other: &Self) -> bool {
+        self.first() <= other.first() && other.last() <= self.last()
+    }
+    pub fn is_supernet(&self, other: &Self) -> bool {
+        self.first() >= other.first() && other.last() >= self.last()
+    }
+    #[inline(always)]
+    fn is_valid(first: u128, cidr: u8) -> bool {
+        first % Ipv6Network::cidr_to_hostcount(cidr) == 0
+    }
+}
+
+impl Iterator for NetworkV4Iterator {
     type Item = Ipv4Network;
     fn next(&mut self) -> Option<Ipv4Network> {
         if self.current < self.max {
@@ -134,6 +188,43 @@ impl Iterator for NetworkIterator {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.current as usize, Some(self.max as usize))
+    }
+}
+
+impl Iterator for NetworkV6Iterator {
+    type Item = Ipv6Network;
+
+    fn next(&mut self) -> Option<Ipv6Network> {
+        if self.current < self.max {
+            self.current += self.stepping;
+            let network = Ipv6Network::new(self.current, self.cidr);
+            match network {
+                Ok(n) => Some(n),
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+impl Ord for Ipv6Network {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let order = self.first().cmp(&other.first());
+        match order {
+            Ordering::Equal => self.cidr.cmp(&other.cidr),
+            _ => order,
+        }
+    }
+}
+
+impl PartialOrd for Ipv6Network {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl PartialEq for Ipv6Network {
+    fn eq(&self, other: &Self) -> bool {
+        self.first == other.first && self.cidr == other.cidr
     }
 }
 impl Ord for Ipv4Network {
@@ -212,12 +303,12 @@ mod tests {
     #[test]
     fn contains_addr() {
         let network = Ipv4Network::new(1, 1, 1, 0, 24).unwrap();
-        assert_eq!(network.contains(&Ipv4Addr::new(1, 1, 1, 1)), true);
+        assert!(network.contains(&Ipv4Addr::new(1, 1, 1, 1)));
     }
     #[test]
     fn iterate() {
         let network = Ipv4Network::new(1, 1, 1, 0, 24).unwrap();
-        let test = network.subnets(25);
+        let test = network.into_subnets(25);
         assert_eq!(test.stepping, 128);
         let test2: Vec<Ipv4Network> = test.collect();
         assert_eq!(test2.len(), 2);
